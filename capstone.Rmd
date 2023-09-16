@@ -1,0 +1,202 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+
+```{r include=FALSE}
+library(Synth)
+library(LowRankQP)
+```
+
+
+```{r include=FALSE}
+library(rvest)
+library(tidyverse)
+```
+
+```{r include=FALSE}
+library(dplyr)
+library(ggplot2)
+library(viridis)
+library(hrbrthemes)
+```
+
+
+```{r include=FALSE}
+library(skimr)
+library(kableExtra)
+library(ggthemes)
+library(stargazer)
+library(kableExtra)
+
+```
+
+```{r echo=FALSE}
+data(basque)
+summary(basque)
+
+```
+
+```{r echo=FALSE}
+str(basque)
+sum(is.na(basque))
+summary(basque$year)
+basque%>% 
+  skim() %>% 
+  kable()
+Delete_Varibles_Table <- c("sec.agriculture", "sec.energy" , "sec.industry" , "sec.construction" , 
+                     "sec.services.venta" , "sec.services.nonventa", "school.illit", "school.prim", 
+                     "school.med", "school.high", "school.post.high", "popdens","invest","regionno")
+Basque_Table <- basque[,!(names(basque) %in% Delete_Varibles_Table)]
+Basque_Table %>%
+  ggplot( aes(x=year, y=gdpcap , group=regionname, color=regionname)) +
+  geom_line() +
+  scale_color_viridis(discrete = TRUE) +
+  theme(
+    legend.position="none",
+    plot.title = element_text(size=14)
+  ) +
+  ggtitle("GDPCAP from 1955-1997 on 18 Spanish Regions") +
+  xlab("YEAR") + ylab("GDPCAP")+
+  theme_ipsum()
+
+```
+
+```{r echo=FALSE}
+Delete_Varibles <- c("sec.agriculture", "sec.energy" , "sec.industry" , "sec.construction" , 
+                     "sec.services.venta" , "sec.services.nonventa", "school.illit", "school.prim", 
+                     "school.med", "school.high", "school.post.high", "popdens")
+
+```
+
+```{r echo=FALSE}
+Basque_DD <- basque[,!(names(basque) %in% Delete_Varibles)]
+
+```
+
+```{r echo=FALSE}
+Basque_DD <- basque[,!(names(basque) %in% Delete_Varibles)]
+basq_Clean <- Basque_DD %>%
+  mutate(post = ifelse(year > 1975, 1, 0),
+         treat = ifelse(regionname == "Basque Country (Pais Vasco)", 1, 0),
+         regionname = as.factor(regionname)) %>%
+  filter(regionno != 1)
+
+```
+
+```{r echo=FALSE}
+basq_first_differences <- basq_Clean %>%
+  filter(treat == 1)
+ggplot(basq_first_differences, aes(x=year, y=gdpcap)) +
+  geom_line(color = "blue") +  theme_economist() +
+  geom_vline(xintercept=1975, color = "steelblue", linetype = "dashed") +
+  labs(title="GDP Trend from 1955–1997 for Basque", 
+       y="GDP per capita",x="Years", color = "Region") +
+  annotate("text", x = 1970, y = 9, label = "Pre-period", size  =5, color = "Red") +
+  annotate("text", x = 1980, y = 9, label = "Post-period", size  =5, color = "Red") 
+```
+
+```{r echo=FALSE}
+f_did <- lm(data = basq_first_differences, gdpcap ~ post)
+stargazer(f_did, type="text")
+```
+
+```{r echo=FALSE}
+dataprep.out <- dataprep(
+  foo = basque,
+  predictors = c("school.illit", "school.prim", "school.med",
+                 "school.high", "school.post.high", "invest"),
+  predictors.op = "mean",
+  time.predictors.prior = 1964:1969,
+  special.predictors = list(
+    list("gdpcap", 1960:1969 ,"mean"),
+    list("sec.agriculture", seq(1961, 1969, 2), "mean"),
+    list("sec.energy", seq(1961, 1969, 2), "mean"),
+    list("sec.industry", seq(1961, 1969, 2), "mean"),
+    list("sec.construction", seq(1961, 1969, 2), "mean"),
+    list("sec.services.venta", seq(1961, 1969, 2), "mean"),
+    list("sec.services.nonventa", seq(1961, 1969, 2), "mean"),
+    list("popdens",               1969,               "mean")),
+  dependent = "gdpcap",
+  unit.variable = "regionno",
+  unit.names.variable = "regionname",
+  time.variable = "year",
+  treatment.identifier = 17,
+  controls.identifier = c(2:16, 18),
+  time.optimize.ssr = 1960:1969,
+  time.plot = 1955:1997)
+
+basq_synth <- basq_Clean %>%
+  rename(Y = gdpcap) %>%
+  mutate(regionname = as.character(regionname))
+ggplot(basq_synth, aes(x=year,y=Y,group=regionno)) +
+  geom_line(aes(color=as.factor(treat), size=as.factor(treat))) + 
+  geom_vline(xintercept=1975,linetype="dashed", color = "steelblue") + theme_classic() + 
+  labs(title="GDP Trend from 1955 to 1997 for All Regions", 
+       y="GDP per Capita",x="Years", color = "Treatment group") +
+  scale_color_manual(labels = c("Control", "Treated"), values = c("Red", "Blue")) +
+  scale_size_manual(values = c(0.5,1), guide = 'none') +
+  annotate("text", x = 1970, y = 11, label = "Pre-period", size  =5, color = "Red") +
+  annotate("text", x = 1980, y = 11, label = "Post-period", size  =5, color = "Red") +
+  theme_economist() 
+```
+
+```{r echo=FALSE}
+Selection <- basq_Clean %>%
+  filter(post == 0) %>%
+  left_join(dplyr::select(basq_Clean[basq_Clean$post==0 & basq_Clean$treat == 1, ], gdpcap, year),
+            by = c("year"= 'year')) %>%
+  mutate(perc_diff = (gdpcap.y - gdpcap.x) / gdpcap.y) %>%
+  group_by(regionname) %>%
+  summarise(gdp_var = abs(var(perc_diff))) %>%
+  arrange(gdp_var)
+```
+
+```{r echo=FALSE}
+did_data <- basq_Clean %>%
+  filter(regionname %in% c("Basque Country (Pais Vasco)", "Cataluna"))
+ggplot(did_data, aes(x=year, y=gdpcap, group = regionname)) +
+  geom_line(aes(color = regionname)) + 
+  theme_economist() + 
+  geom_vline(xintercept=1975, color = "steelblue", linetype = "dashed") +
+  labs(title="GDP Trend from 1955-1997 for Different Regions", 
+       y="GDP per Capita",x="Years", color = "Region") +
+  scale_color_manual(labels = c("Basque (Treated)", "Cataluna (Control)"), values = c("Blue", "Red"))+
+  annotate("text", x = 1970, y = 11, label = "Pre-period", size  =5, color = "Red") +
+  annotate("text", x = 1980, y = 11, label = "Post-period", size  =5, color = "Red")
+```
+
+```{r echo=FALSE}
+did <- lm(data = did_data, gdpcap ~ treat*post)
+stargazer(did, type="text")
+```
+
+```{r echo=FALSE}
+dataprep.out <- dataprep(
+  foo = basque,
+  predictors = c("school.illit", "school.prim", "school.med",
+                 "school.high", "school.post.high", "invest"),
+  predictors.op = "mean",
+  time.predictors.prior = 1964:1969,
+  special.predictors = list(
+    list("gdpcap", 1960:1969 ,"mean"),
+    list("sec.agriculture", seq(1961, 1969, 2), "mean"),
+    list("sec.energy", seq(1961, 1969, 2), "mean"),
+    list("sec.industry", seq(1961, 1969, 2), "mean"),
+    list("sec.construction", seq(1961, 1969, 2), "mean"),
+    list("sec.services.venta", seq(1961, 1969, 2), "mean"),
+    list("sec.services.nonventa", seq(1961, 1969, 2), "mean"),
+    list("popdens",               1969,               "mean")),
+  dependent = "gdpcap",
+  unit.variable = "regionno",
+  unit.names.variable = "regionname",
+  time.variable = "year",
+  treatment.identifier = 17,
+  controls.identifier = c(2:16, 18),
+  time.optimize.ssr = 1960:1969,
+  time.plot = 1955:1997)
+
+synth.out = synth(dataprep.out)
+```
+
